@@ -34,9 +34,18 @@ if [ -d /home/node/.claude ]; then
     rsync -a --delete /home/node/.claude/ "$WORK_DIR/.claude/"
 fi
 
-# Prettify JS files
+# Prettify JS files one by one (prettier ignores node_modules by default)
 echo "Prettifying JS files..."
-find "$WORK_DIR/npm-global" -name "*.js" -type f -print0 | xargs -0 -r prettier --write 2>/dev/null || true
+find "$WORK_DIR/npm-global" -name "*.js" -type f | while read -r jsfile; do
+    echo "  Formatting: $jsfile"
+    # Copy to temp, format, copy back (avoids prettier's node_modules ignore)
+    cp "$jsfile" /tmp/format.js
+    if prettier --write /tmp/format.js > /dev/null 2>&1; then
+        cp /tmp/format.js "$jsfile"
+    else
+        echo "  Warning: prettier failed on $jsfile"
+    fi
+done
 
 # Commit and push if changes
 git add -A
