@@ -49,11 +49,13 @@ Or pass it as an environment variable at runtime.
 ### 6. Test run
 
 ```bash
-podman run --rm \
+podman run --rm --userns=keep-id \
     -e CLAUDETRACKER_REPO_URL=git@github.com:YOUR_USER/claudetracker-data.git \
     -v ~/.ssh/claudetracker_key:/run/secrets/deploy_key:ro \
     claudetracker:latest
 ```
+
+Note: `--userns=keep-id` is required for rootless podman to preserve uid mapping so the container can read the SSH key.
 
 ### 7. Set up cron (hourly)
 
@@ -64,7 +66,7 @@ crontab -e
 Add:
 
 ```
-0 * * * * podman run --rm -e CLAUDETRACKER_REPO_URL=git@github.com:YOUR_USER/claudetracker-data.git -v /home/YOUR_USER/.ssh/claudetracker_key:/run/secrets/deploy_key:ro claudetracker:latest >> /var/log/claudetracker.log 2>&1
+0 * * * * podman run --rm --userns=keep-id -e CLAUDETRACKER_REPO_URL=git@github.com:YOUR_USER/claudetracker-data.git -v /home/YOUR_USER/.ssh/claudetracker_key:/run/secrets/deploy_key:ro claudetracker:latest >> /var/log/claudetracker.log 2>&1
 ```
 
 ## Environment Variables
