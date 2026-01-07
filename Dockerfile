@@ -16,6 +16,14 @@ RUN mkdir -p /home/node/.npm-global && chown -R node:node /home/node/.npm-global
 # Install prettier and claude-code to the tracked location
 RUN npm install -g prettier @anthropic-ai/claude-code
 
+# Copy fingerprint system
+COPY --chown=node:node package.json package-lock.json tsconfig.json /home/node/tracker/
+COPY --chown=node:node src/ /home/node/tracker/src/
+
+# Install and build fingerprint system
+WORKDIR /home/node/tracker
+RUN npm ci && npm run build
+
 COPY update-supervisor.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/update-supervisor.sh
 

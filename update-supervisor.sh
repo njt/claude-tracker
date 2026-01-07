@@ -47,6 +47,38 @@ find "$WORK_DIR/npm-global" -name "*.js" -type f | while read -r jsfile; do
     fi
 done
 
+# Run fingerprint analysis on the main CLI
+CLI_JS="$WORK_DIR/npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+if [ -f "$CLI_JS" ]; then
+    echo "Running fingerprint analysis..."
+    REPORT_DIR="$WORK_DIR/fingerprints"
+    mkdir -p "$REPORT_DIR"
+
+    # Generate fingerprint report
+    node /home/node/tracker/dist/cli/fingerprint.js "$CLI_JS" --with-anchors --json > "$REPORT_DIR/latest.json" 2>/dev/null || true
+
+    # Generate summary
+    node -e "
+const data = require('$REPORT_DIR/latest.json');
+const named = data.filter(f => f.inferredName);
+const summary = {
+  timestamp: new Date().toISOString(),
+  totalFunctions: data.length,
+  autoNamed: named.length,
+  autoNamedPercent: ((named.length / data.length) * 100).toFixed(1),
+  samples: named.slice(0, 20).map(f => ({
+    minified: f.name,
+    inferred: f.inferredName,
+    confidence: (f.confidence * 100).toFixed(0) + '%',
+    anchors: f.fingerprint.anchors.slice(0, 2)
+  }))
+};
+console.log(JSON.stringify(summary, null, 2));
+" > "$REPORT_DIR/summary.json" 2>/dev/null || echo "Summary generation failed"
+
+    echo "Fingerprint analysis complete"
+fi
+
 # Commit and push if changes
 git add -A
 if ! git diff --cached --quiet; then

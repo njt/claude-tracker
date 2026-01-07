@@ -35,10 +35,11 @@ async function main(): Promise<void> {
   const withAnchorsOnly = args.includes('--with-anchors');
   const jsonOutput = args.includes('--json');
 
-  console.log(`Parsing ${filePath}...`);
+  const log = jsonOutput ? (...args: any[]) => process.stderr.write(args.join(' ') + '\n') : console.log;
+  log(`Parsing ${filePath}...`);
   const code = await readFile(filePath, 'utf-8');
   const { ast } = parseCode(code);
-  console.log('Parsing complete. Extracting functions...');
+  log('Parsing complete. Extracting functions...');
 
   const functions: FunctionInfo[] = [];
 
@@ -109,7 +110,7 @@ async function main(): Promise<void> {
     }
   });
 
-  console.log(`Found ${functions.length} functions${withAnchorsOnly ? ' with anchors' : ''}`);
+  log(`Found ${functions.length} functions${withAnchorsOnly ? ' with anchors' : ''}`);
 
   // Sort by: has inferred name first, then by anchor count, then by name
   functions.sort((a, b) => {
