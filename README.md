@@ -82,7 +82,6 @@ After first run, your data repo will contain:
 
 ```
 claudetracker-data/
-├── .claude/           # Claude config directory
 └── npm-global/        # Prettified Claude Code package
 ```
 

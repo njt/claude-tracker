@@ -27,7 +27,6 @@ claudetracker/
 
 ```
 claudetracker-data/
-├── .claude/           # Claude config directory
 ├── npm-global/        # Prettified npm global install
 └── .gitignore
 ```
@@ -54,7 +53,7 @@ Host cron (hourly)
   → podman run claudetracker
     → clone claudetracker-data via SSH
     → claude update
-    → rsync .npm-global/ and .claude/ into repo
+    → rsync .npm-global/ into repo
     → prettier --write on all JS files
     → git commit/push (if changes)
     → container exits
@@ -116,7 +115,6 @@ cd "$WORK_DIR"
 claude update || npm update -g @anthropic-ai/claude-code
 
 rsync -a --delete /home/node/.npm-global/ "$WORK_DIR/npm-global/"
-rsync -a --delete /home/node/.claude/ "$WORK_DIR/.claude/" 2>/dev/null || true
 
 find "$WORK_DIR/npm-global" -name "*.js" -exec prettier --write {} + 2>/dev/null || true
 
@@ -185,4 +183,4 @@ Add:
 | Repos | Two (infra + data) | Data repo history is purely Claude changes |
 | Scheduling | Host cron | Portable across WSL, Linux, cloud |
 | Base image | node:20-slim | Balance of size and compatibility |
-| Tracked files | npm-global + .claude | Code changes + config schema evolution |
+| Tracked files | npm-global | Code changes only (removed .claude/ - too noisy) |

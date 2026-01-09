@@ -10,11 +10,13 @@ RUN apt-get update && apt-get install -y \
 ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
 ENV PATH="/home/node/.npm-global/bin:$PATH"
 
-# Create npm-global dir with correct ownership
-RUN mkdir -p /home/node/.npm-global && chown -R node:node /home/node/.npm-global
+# Create npm directories with correct ownership
+RUN mkdir -p /home/node/.npm-global /home/node/.npm && chown -R node:node /home/node/.npm-global /home/node/.npm
 
-# Install prettier and claude-code to the tracked location
+# Install prettier and claude-code as node user to avoid permission issues
+USER node
 RUN npm install -g prettier @anthropic-ai/claude-code
+USER root
 
 # Copy fingerprint system
 COPY --chown=node:node package.json package-lock.json tsconfig.json /home/node/tracker/

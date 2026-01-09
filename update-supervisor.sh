@@ -29,10 +29,8 @@ echo "Copying tracked files..."
 mkdir -p "$WORK_DIR/npm-global"
 rsync -a --delete /home/node/.npm-global/ "$WORK_DIR/npm-global/"
 
-if [ -d /home/node/.claude ]; then
-    mkdir -p "$WORK_DIR/.claude"
-    rsync -a --delete /home/node/.claude/ "$WORK_DIR/.claude/"
-fi
+# Remove .claude/ if it exists (no longer tracked - too noisy)
+rm -rf "$WORK_DIR/.claude"
 
 # Prettify JS files one by one (prettier ignores node_modules by default)
 echo "Prettifying JS files..."
