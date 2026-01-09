@@ -5,6 +5,68 @@
 import type { AnchorRule } from '../store/schema.js';
 
 /**
+ * STRONG third-party markers - if ANY anchor matches, filter the function
+ * These are definitive identifiers of bundled libraries
+ */
+export const STRONG_THIRD_PARTY_MARKERS = [
+  // React DevTools - very specific strings
+  /React DevTools/i,
+  /Could not find Fiber/,
+  /Return fibers should always be each others/,
+  /filter preferences while profiling/,
+  /error thrown in the component/,
+  /Error generating stack/,
+  /fburl\.com/,
+  /reactjs\.org/,
+  /react-devtools/i,
+
+  // Other bundled libs
+  /sourceMappingURL/,
+];
+
+/**
+ * Patterns that indicate Claude Code (whitelist - these always pass)
+ */
+export const CLAUDE_CODE_PATTERNS = [
+  /^CLAUDE_/,
+  /^ANTHROPIC_/,
+  /^VERTEX_/,
+  /^claude_code\./,
+  /api\.anthropic\.com/,
+  /console\.anthropic\.com/,
+  /statsig\.anthropic\.com/,
+  /You are Claude/i,
+  /Claude Code/,
+  /claude-opus/,
+  /claude-sonnet/,
+  /claude-haiku/,
+];
+
+/**
+ * Check if anchors indicate third-party code
+ */
+export function isThirdPartyFunction(anchors: string[]): boolean {
+  if (anchors.length === 0) return false;
+
+  // First check: if ANY anchor matches Claude Code patterns, keep it (whitelist wins)
+  for (const anchor of anchors) {
+    if (CLAUDE_CODE_PATTERNS.some((p) => p.test(anchor))) {
+      return false;
+    }
+  }
+
+  // Second check: if ANY anchor matches strong third-party markers, filter it
+  for (const anchor of anchors) {
+    if (STRONG_THIRD_PARTY_MARKERS.some((p) => p.test(anchor))) {
+      return true;
+    }
+  }
+
+  // No strong signals either way - keep it
+  return false;
+}
+
+/**
  * Patterns that indicate a stable string anchor
  */
 export const STABLE_STRING_PATTERNS = [
@@ -166,22 +228,6 @@ export const ANCHOR_NAME_RULES: AnchorRule[] = [
     suggestedName: 'getModelId',
     confidence: 0.8,
     description: 'Model identifier',
-  },
-
-  // Error handling
-  {
-    pattern: 'Invalid renderer id',
-    isRegex: false,
-    suggestedName: 'handleInvalidRendererId',
-    confidence: 0.7,
-    description: 'React DevTools renderer validation',
-  },
-  {
-    pattern: 'Could not find Fiber',
-    isRegex: false,
-    suggestedName: 'findFiber',
-    confidence: 0.7,
-    description: 'React Fiber lookup',
   },
 ];
 

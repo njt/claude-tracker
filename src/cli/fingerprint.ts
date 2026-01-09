@@ -6,7 +6,7 @@
 import { readFile } from 'fs/promises';
 import { parseCode } from '../parser/index.js';
 import { generateFingerprint } from '../fingerprint/generator.js';
-import { inferNameFromAnchors } from '../anchors/rules.js';
+import { inferNameFromAnchors, isThirdPartyFunction } from '../anchors/rules.js';
 import type { FunctionNode } from '../anchors/extractor.js';
 
 interface FunctionInfo {
@@ -21,12 +21,13 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   if (args.length === 0) {
-    console.log('Usage: fingerprint <file.js> [--limit N] [--with-anchors] [--json]');
+    console.log('Usage: fingerprint <file.js> [--limit N] [--with-anchors] [--json] [--all]');
     console.log('');
     console.log('Options:');
     console.log('  --limit N       Only show first N functions');
     console.log('  --with-anchors  Only show functions with stable anchors');
     console.log('  --json          Output as JSON');
+    console.log('  --all           Include third-party library functions (filtered by default)');
     process.exit(1);
   }
 
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
   const limit = args.includes('--limit') ? parseInt(args[args.indexOf('--limit') + 1]) : Infinity;
   const withAnchorsOnly = args.includes('--with-anchors');
   const jsonOutput = args.includes('--json');
+  const includeThirdParty = args.includes('--all');
 
   const log = jsonOutput ? (...args: any[]) => process.stderr.write(args.join(' ') + '\n') : console.log;
   log(`Parsing ${filePath}...`);
@@ -110,10 +112,23 @@ async function main(): Promise<void> {
     }
   });
 
-  log(`Found ${functions.length} functions${withAnchorsOnly ? ' with anchors' : ''}`);
+  const totalBeforeFilter = functions.length;
+
+  // Filter out third-party library functions unless --all is specified
+  const filtered = includeThirdParty
+    ? functions
+    : functions.filter((f) => !isThirdPartyFunction(f.fingerprint.anchors));
+
+  const thirdPartyCount = totalBeforeFilter - filtered.length;
+
+  log(`Found ${totalBeforeFilter} functions${withAnchorsOnly ? ' with anchors' : ''}`);
+  if (!includeThirdParty && thirdPartyCount > 0) {
+    log(`Filtered ${thirdPartyCount} third-party library functions (use --all to include)`);
+  }
+  log(`Showing ${filtered.length} Claude Code functions`);
 
   // Sort by: has inferred name first, then by anchor count, then by name
-  functions.sort((a, b) => {
+  filtered.sort((a, b) => {
     if (a.inferredName && !b.inferredName) return -1;
     if (!a.inferredName && b.inferredName) return 1;
     if (b.fingerprint.anchors.length !== a.fingerprint.anchors.length) {
@@ -122,7 +137,7 @@ async function main(): Promise<void> {
     return a.name.localeCompare(b.name);
   });
 
-  const toShow = functions.slice(0, limit);
+  const toShow = filtered.slice(0, limit);
 
   if (jsonOutput) {
     console.log(JSON.stringify(toShow, null, 2));
@@ -158,13 +173,16 @@ async function main(): Promise<void> {
     }
 
     // Summary
-    const withInferred = functions.filter((f) => f.inferredName).length;
-    const withAnchors = functions.filter((f) => f.fingerprint.anchors.length > 0).length;
+    const withInferred = filtered.filter((f) => f.inferredName).length;
+    const withAnchors = filtered.filter((f) => f.fingerprint.anchors.length > 0).length;
 
     console.log('=== Summary ===');
-    console.log(`Total functions: ${functions.length}`);
-    console.log(`With anchors: ${withAnchors} (${((withAnchors / functions.length) * 100).toFixed(1)}%)`);
-    console.log(`Auto-named: ${withInferred} (${((withInferred / functions.length) * 100).toFixed(1)}%)`);
+    console.log(`Total functions (after filtering): ${filtered.length}`);
+    if (thirdPartyCount > 0) {
+      console.log(`Third-party filtered: ${thirdPartyCount}`);
+    }
+    console.log(`With anchors: ${withAnchors} (${((withAnchors / filtered.length) * 100).toFixed(1)}%)`);
+    console.log(`Auto-named: ${withInferred} (${((withInferred / filtered.length) * 100).toFixed(1)}%)`);
   }
 }
 
