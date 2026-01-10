@@ -1,570 +1,651 @@
-# Expanding Semantic Names for Claude Code Functions
+# Toward Readable Deminified Code
 
-## Overview
+## The Real Goal
 
-This plan guides the systematic expansion of semantic naming rules in the claudetracker project. The goal is to increase coverage from the current ~24 named functions to a much higher number by analyzing fingerprint data and adding high-value anchor rules to `src/anchors/rules.ts`.
+Transform this:
+```javascript
+function EB() {
+  return process.env.CLAUDE_CONFIG_DIR ?? euQ(AmQ(), ".claude");
+}
+var A1 = { Bash: Xz, Read: Qm, Write: Rv, Glob: Tv, Grep: Uv };
+class En0 { constructor(a) { this.x = a; } y(b) { return this.x + b; } }
+```
 
-## Prerequisites
+Into something approaching the original source:
+```javascript
+// src/config/paths.ts
+function getClaudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR ?? joinPath(getHomeDir(), ".claude");
+}
 
-Before starting, ensure you have:
+// src/tools/registry.ts
+var TOOL_REGISTRY = {
+  Bash: executeBashTool,
+  Read: executeReadTool,
+  Write: executeWriteTool,
+  Glob: executeGlobTool,
+  Grep: executeGrepTool
+};
 
-1. **claudetracker repo**: `C:\Users\Nat\source\claudetracker`
-2. **Data repo cloned locally**: Clone from `github.com:njt/claude-tracker-data.git`
-3. **Node.js 20+** installed
-4. **TypeScript built**: Run `npm run build` in the claudetracker repo
-
-## Part 1: Understanding the Current System
-
-### 1.1 Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/anchors/rules.ts` | Contains `ANCHOR_NAME_RULES` array - the main rules to expand |
-| `src/anchors/extractor.ts` | Extracts stable strings/env vars from function AST nodes |
-| `src/fingerprint/generator.ts` | Generates structural fingerprints including anchors |
-| `src/cli/fingerprint.ts` | CLI tool to run fingerprinting on JS files |
-| `scripts/validate-across-versions.sh` | Validates rules work across Claude Code versions |
-
-### 1.2 Rule Structure
-
-Each rule in `ANCHOR_NAME_RULES` has this structure:
-
-```typescript
-interface AnchorRule {
-  pattern: string;       // String to match (exact or regex)
-  isRegex: boolean;      // true if pattern is a regex
-  suggestedName: string; // The semantic function name to assign
-  confidence: number;    // 0-1, how confident we are (0.8-0.95 typical)
-  description?: string;  // Human-readable explanation
+// src/core/BaseHandler.ts
+class BaseHandler {
+  constructor(config) { this.config = config; }
+  execute(input) { return this.config + input; }
 }
 ```
 
-**Matching behavior**:
-- If `isRegex: false`, uses `anchor.includes(pattern)` - substring match
-- If `isRegex: true`, uses `new RegExp(pattern).test(anchor)` - full regex
+**Current reality**: 24 functions renamed out of ~2,200+ identifiers = 1% coverage.
+**Target**: 60%+ of meaningful identifiers renamed, code logically grouped with comments.
 
-### 1.3 Current Categories
+## Why the Current Approach Falls Short
 
-The existing ~24 rules cover:
-- **Configuration** (2 rules): `CLAUDE_CONFIG_DIR`, `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR`
-- **Metrics** (8 rules): `claude_code.session.count`, `claude_code.lines_of_code.count`, etc.
-- **API URLs** (3 rules): `https://api.anthropic.com`, OAuth endpoints
-- **System prompts** (2 rules): Main prompt, agent SDK prompt
-- **Model names** (2 rules): Vertex region, model identifiers
+The current strategy is "add anchor rules one by one":
+- Each rule requires manual analysis
+- Only functions with unique string literals get renamed
+- Variables, classes, parameters all stay minified
+- No structural inference from code patterns
+- No leveraging of available type information
 
-## Part 2: Pulling and Analyzing Fingerprint Data
+This is like translating a book word-by-word with a dictionary. It works, but you'll die of old age before finishing.
 
-### 2.1 Clone the Data Repository
+## Three Levels of Readability
 
-```bash
-# Clone the data repo (if not already present)
-git clone git@github.com:njt/claude-tracker-data.git /tmp/claude-tracker-data
+### Level 1: Current (Anchor-Based Naming)
+- Match string literals to function names
+- ~50-100 functions nameable
+- Leaves 95%+ of code minified
 
-# Or if already cloned, pull latest
-cd /tmp/claude-tracker-data && git pull
+### Level 2: Structural Inference (This Plan)
+- Analyze code patterns to infer names
+- Propagate names through the dependency graph
+- Rename variables, parameters, classes
+- Extract logical modules from the bundle
+- Target: 60%+ meaningful coverage
+
+### Level 3: Full Decompilation (Future)
+- Source map recovery (if Anthropic ever publishes them)
+- ML-based name prediction (like JSNice)
+- Manual annotation of remaining symbols
+- Target: 90%+ coverage
+
+This plan focuses on Level 2.
+
+---
+
+## Part 1: Structural Inference Strategies
+
+### 1.1 Exploit Bundler Patterns
+
+Modern bundlers (esbuild, webpack) leave fingerprints:
+
+```javascript
+// Module factory pattern - the number often indicates module order
+var A1 = U((exports, module) => { ... });
+
+// Re-export pattern - tells us what symbols are public
+G5(A, { Tool1: () => Xz, Tool2: () => Qm });
+
+// Import pattern - shows dependencies
+var { x: foo, y: bar } = require("./module");
 ```
 
-### 2.2 Locate the Fingerprint Data
+**Action**: Parse the bundle structure to identify:
+- Module boundaries (each `U((exports, module) => ...)` is one file)
+- Public exports (G5 re-export calls)
+- Import/export relationships
 
-The fingerprint data is generated to `fingerprints/latest.json` in the data repo. Each entry has:
+### 1.2 Object Property Inference
 
-```typescript
-{
-  name: string;              // Minified function name (e.g., "Xz")
-  type: string;              // "declaration" | "expression" | "arrow"
-  inferredName: string|null; // Semantic name if matched, null otherwise
-  confidence: number;        // Match confidence
-  fingerprint: {
-    hash: string;            // SHA256 fingerprint
-    minifiedName: string;    // Same as top-level name
-    anchors: string[];       // IMPORTANT: Stable strings found in function
-    paramCount: number;      // Number of parameters
-    callSignature: string[]; // Normalized call patterns
-    controlFlow: string;     // if/for/while/try patterns
-    nodeCount: number;       // AST complexity
-    depth: number;           // Max nesting
-    location: {...}          // Line numbers
-  }
+When we see:
+```javascript
+var tools = { Bash: Xz, Read: Qm, Write: Rv };
+```
+
+We can infer:
+- `Xz` is likely `bashHandler` or `executeBash`
+- `Qm` is likely `readHandler` or `executeRead`
+- `Rv` is likely `writeHandler` or `executeWrite`
+
+**Action**: Track object literal assignments where keys are readable names, propagate to values.
+
+### 1.3 Class Method Naming
+
+Classes have structure that survives minification:
+```javascript
+class En0 {
+  constructor(a) { this.config = a; }
+  execute(b) { return this.handler(b); }
+  get name() { return "ToolX"; }
 }
 ```
 
-### 2.3 Generate Fresh Fingerprint Data
+Getters named `name` that return string literals are gold - they tell us what the class is called.
 
-If `fingerprints/latest.json` doesn't exist or is stale:
+**Action**: Find classes with `name` getters returning strings, rename the class.
 
-```bash
-# Build the tracker tools
-cd C:\Users\Nat\source\claudetracker
-npm run build
+### 1.4 Parameter Name Inference from JSDoc/TypeScript
 
-# Find the cli.js file in the data repo
-CLI_JS="/tmp/claude-tracker-data/npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
-
-# Generate fingerprints with anchors
-node dist/cli/fingerprint.js "$CLI_JS" --with-anchors --json > /tmp/fingerprints.json
-
-# View summary
-node dist/cli/fingerprint.js "$CLI_JS" --with-anchors 2>&1 | tail -20
+The sdk-tools.d.ts file provides type information:
+```typescript
+export interface BashInput {
+  command: string;
+  timeout?: number;
+  description?: string;
+}
 ```
 
-### 2.4 Analyze Current Coverage
+If we can correlate functions to these interfaces (by matching parameter patterns), we can name parameters.
 
-```bash
-# Count total functions with anchors
-jq 'length' /tmp/fingerprints.json
+**Action**: Parse .d.ts files, match function signatures, apply parameter names.
 
-# Count functions already named
-jq '[.[] | select(.inferredName != null)] | length' /tmp/fingerprints.json
+### 1.5 Call Graph Propagation
 
-# List all inferred names
-jq -r '.[] | select(.inferredName != null) | "\(.inferredName): \(.name)"' /tmp/fingerprints.json | sort
+If we know `Xz` is `executeBashTool`, and we see:
+```javascript
+function ABC() { return Xz(...arguments); }
 ```
 
-## Part 3: Finding High-Value Anchor Candidates
+Then `ABC` is likely a wrapper, nameable as `executeBashToolWrapper` or similar.
 
-### 3.1 Extract All Unique Anchors
+**Action**: Build call graph, propagate names from known functions to their callers/callees.
 
-```bash
-# Get all unique anchors sorted by frequency
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | sort | uniq -c | sort -rn > /tmp/anchor-frequency.txt
+---
 
-# View top 50 most common anchors
-head -50 /tmp/anchor-frequency.txt
+## Part 2: Variable and Parameter Renaming
+
+### 2.1 The Problem
+
+Current deminifier only renames function names, not:
+- Local variables inside functions
+- Function parameters
+- Class properties
+- Imported names
+
+### 2.2 Scope-Aware Renaming
+
+Implement renaming within scopes:
+
+```javascript
+// Before
+function getConfigDir(a, b) {
+  var c = process.env.CLAUDE_CONFIG_DIR;
+  var d = a ?? joinPath(b, ".claude");
+  return d || c;
+}
+
+// After (with parameter inference)
+function getConfigDir(envOverride, homeDir) {
+  var envValue = process.env.CLAUDE_CONFIG_DIR;
+  var defaultPath = envOverride ?? joinPath(homeDir, ".claude");
+  return defaultPath || envValue;
+}
 ```
 
-### 3.2 Filter for Claude-Specific Patterns
+**Strategies for variable naming**:
+1. **Type-based**: If assigned a string, call it `str` or `value`
+2. **Source-based**: If assigned from `process.env.X`, call it `envX`
+3. **Usage-based**: If passed to `JSON.parse()`, call it `jsonString`
+4. **Position-based**: First param often `input`, `config`, or `options`
 
-Look for anchors containing these high-value indicators:
+### 2.3 Implementation
 
-```bash
-# Claude Code specific prefixes
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep -i "claude" | sort | uniq -c | sort -rn
+Extend `deminify.ts` to:
+1. Track scope chains
+2. For each scope, analyze variable usage patterns
+3. Apply naming heuristics
+4. Use Babel's `scope.rename()` for safe renaming
 
-# Anthropic-related
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep -i "anthropic" | sort | uniq -c | sort -rn
+---
 
-# Metric names (claude_code.*)
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep "^claude_code\." | sort | uniq -c | sort -rn
+## Part 3: Comment Injection
 
-# Environment variables (CLAUDE_*, ANTHROPIC_*, VERTEX_*)
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep -E "^(CLAUDE_|ANTHROPIC_|VERTEX_)" | sort | uniq -c | sort -rn
+### 3.1 Function Documentation
 
-# API endpoints
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep -E "^https?://" | sort | uniq -c | sort -rn
+Add comments explaining what functions do:
 
-# Error messages (useful for exception handlers)
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep -iE "(error|failed|invalid|cannot|could not)" | sort | uniq -c | sort -rn
+```javascript
+/**
+ * Gets the Claude configuration directory.
+ * Checks CLAUDE_CONFIG_DIR env var, falls back to ~/.claude
+ * @inferred from anchor: CLAUDE_CONFIG_DIR
+ */
+function getClaudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR ?? joinPath(getHomeDir(), ".claude");
+}
 ```
 
-### 3.3 Find Functions with Multiple Related Anchors
+### 3.2 Section Markers
 
-Functions with multiple related anchors are easier to name confidently:
+Group related functions with section comments:
 
-```bash
-# Find functions with 3+ anchors (more context = better naming)
-jq -r '.[] | select(.fingerprint.anchors | length >= 3) |
-  "\(.name): \(.fingerprint.anchors | join(" | "))"' /tmp/fingerprints.json
+```javascript
+// ============================================================
+// TOOL HANDLERS (src/tools/*.ts)
+// Functions that implement each tool Claude can use
+// ============================================================
 
-# Find unnamed functions with good anchors
-jq -r '.[] | select(.inferredName == null and (.fingerprint.anchors | length >= 2)) |
-  "[\(.name)] \(.fingerprint.anchors[0:3] | join(" | "))"' /tmp/fingerprints.json
+function executeBashTool(input) { ... }
+function executeReadTool(input) { ... }
+function executeWriteTool(input) { ... }
+
+// ============================================================
+// CONFIGURATION (src/config/*.ts)
+// Settings, environment variables, paths
+// ============================================================
+
+function getClaudeConfigDir() { ... }
+function getClaudeApiKey() { ... }
 ```
 
-### 3.4 Categorize Candidate Anchors
+### 3.3 Implementation
 
-Create a working list of candidate anchors organized by category:
+1. Parse fingerprint data to find function clusters (by anchor patterns)
+2. Group functions by inferred category
+3. Generate section comments
+4. Inject into AST before generation
 
-```bash
-# Save candidates to a file for analysis
-jq -r '
-  .[] |
-  select(.inferredName == null) |
-  select(.fingerprint.anchors | length > 0) |
-  .fingerprint.anchors[]
-' /tmp/fingerprints.json | sort | uniq -c | sort -rn > /tmp/unnamed-anchors.txt
+---
+
+## Part 4: Module Extraction
+
+### 4.1 The Vision
+
+Instead of one 5000-line file, produce:
+```
+deminified/
+├── index.js           # Main entry, imports everything
+├── tools/
+│   ├── bash.js
+│   ├── read.js
+│   └── ...
+├── config/
+│   ├── paths.js
+│   └── settings.js
+├── api/
+│   ├── anthropic.js
+│   └── oauth.js
+└── ui/
+    ├── terminal.js
+    └── prompts.js
 ```
 
-## Part 4: Identifying Function Purposes from Context
+### 4.2 Module Detection
 
-### 4.1 Analyze Anchor Context
+Identify module boundaries in the bundle:
 
-For each promising anchor, examine the full function context:
+```javascript
+// Each of these is likely a separate source file:
+var module1 = U((exports, module) => {
+  // ... module 1 code
+});
 
-```bash
-# Find all functions containing a specific anchor
-ANCHOR="your_anchor_here"
-jq --arg a "$ANCHOR" '
-  .[] |
-  select(.fingerprint.anchors | any(contains($a))) |
-  {
-    name: .name,
-    anchors: .fingerprint.anchors,
-    paramCount: .fingerprint.paramCount,
-    controlFlow: .fingerprint.controlFlow,
-    callSignature: .fingerprint.callSignature[0:5],
-    location: .fingerprint.location
-  }
-' /tmp/fingerprints.json
+var module2 = U((exports, module) => {
+  // ... module 2 code
+});
 ```
 
-### 4.2 Naming Heuristics
+### 4.3 Dependency Tracking
 
-Use these patterns to infer function names:
+Build the import graph:
+```javascript
+// If module2 references module1:
+var { exportedThing } = module1;
+// This becomes:
+import { exportedThing } from './module1.js';
+```
 
-| Anchor Pattern | Likely Purpose | Name Pattern |
-|---------------|----------------|--------------|
-| `process.env.CLAUDE_X` | Config getter | `getClaudeX` or `isXEnabled` |
-| `claude_code.X.count` | Metric counter | `getXCounter` |
-| `claude_code.X.usage` | Usage metric | `getXUsageMetric` |
-| `https://api.X.com/Y` | API endpoint | `getYEndpoint` or `callYApi` |
-| `Error: X` / `Invalid X` | Error handler | `handleXError` or `validateX` |
-| `You are X` | System prompt | `getXSystemPrompt` |
-| Tool definition strings | Tool handler | `handleXTool` or `executeX` |
-| Settings keys | Settings accessor | `getXSetting` or `setXSetting` |
+### 4.4 File Naming
 
-### 4.3 Control Flow as Context
+Use anchors and exports to name files:
+- Module with `CLAUDE_CONFIG_DIR` anchor -> `config/paths.js`
+- Module with `api.anthropic.com` anchor -> `api/anthropic.js`
+- Module exporting `{ Bash, Read, Write }` -> `tools/registry.js`
 
-The `controlFlow` field provides additional naming hints:
+---
 
-| Control Flow | Likely Pattern | Name Hint |
-|-------------|----------------|-----------|
-| `return-nullish` | Getter with default | `getX` |
-| `return-or` | Boolean check | `isX` or `hasX` |
-| `if,return` | Guard/validation | `validateX` or `checkX` |
-| `try,return` | Safe accessor | `tryGetX` |
-| `throw` | Error thrower | `throwXError` |
-| `await,return` | Async getter | `fetchX` or `loadX` |
-| `switch,return` | Dispatcher | `handleX` or `dispatchX` |
+## Part 5: Leveraging sdk-tools.d.ts
 
-### 4.4 Call Signature Context
+### 5.1 Available Type Information
 
-The `callSignature` array shows what APIs the function uses:
+The package includes `sdk-tools.d.ts` with:
+- All tool input interfaces (BashInput, ReadInput, etc.)
+- Parameter names and types
+- JSDoc comments
 
-| Call Pattern | Suggests |
-|-------------|----------|
-| `console.log`, `console.error` | Logging function |
-| `JSON.parse`, `JSON.stringify` | Serialization |
-| `fetch` | Network request |
-| `process.env.$prop` | Environment reader |
-| `Array.map`, `Array.filter` | Data transformer |
+### 5.2 Matching Strategy
 
-## Part 5: Adding New Rules to rules.ts
-
-### 5.1 Rule Template
-
-Add new rules to the `ANCHOR_NAME_RULES` array in `src/anchors/rules.ts`:
+For each function that handles tool input:
+1. Analyze its parameter structure
+2. Match against known interfaces
+3. Apply parameter names from interface
 
 ```typescript
-// Category comment for grouping
-{
-  pattern: 'exact_string_to_match',
-  isRegex: false,
-  suggestedName: 'semanticFunctionName',
-  confidence: 0.9,  // Use 0.85-0.95 for most rules
-  description: 'Brief explanation of what this function does',
-},
+// From sdk-tools.d.ts:
+interface BashInput {
+  command: string;
+  timeout?: number;
+  description?: string;
+}
 
-// Or for regex patterns
-{
-  pattern: '^prefix_',
-  isRegex: true,
-  suggestedName: 'genericNameForPattern',
-  confidence: 0.8,  // Lower confidence for regex (more ambiguous)
-  description: 'Matches all X-type functions',
-},
+// Matches function with signature like:
+function Xz(a) {
+  // Uses a.command, a.timeout, a.description
+}
+// -> Rename to executeBashTool(input: BashInput)
 ```
 
-### 5.2 Confidence Guidelines
+### 5.3 Implementation
 
-| Confidence | When to Use |
-|------------|-------------|
-| 0.95 | Unique, specific anchor that definitively identifies one function |
-| 0.90 | Strong indicator, very unlikely to match wrong function |
-| 0.85 | Good indicator, may match related functions |
-| 0.80 | Pattern-based rule, might match multiple similar functions |
-| 0.75 | Weak indicator, use only when nothing better available |
+1. Parse `sdk-tools.d.ts` into interface map
+2. For each tool handler function, check property accesses
+3. Match accessed properties to interface fields
+4. Rename parameters and add type annotations as comments
 
-### 5.3 Best Practices
+---
 
-1. **Prefer specific over generic**: `claude_code.session.count` is better than `session`
-2. **Use exact match when possible**: `isRegex: false` with full string
-3. **Avoid short patterns**: Patterns under 15 characters risk false matches
-4. **Group related rules**: Add category comments for organization
-5. **Document edge cases**: Use `description` to explain ambiguity
+## Part 6: Implementation Roadmap
 
-### 5.4 Incremental Addition Process
+### Phase 1: Enhanced Infrastructure (Week 1)
 
-Add rules in batches, testing after each:
+**Goal**: Build tooling for batch operations
+
+1. **Bundle Parser**
+   - Detect esbuild/webpack patterns
+   - Extract module boundaries
+   - Map export relationships
+
+2. **Call Graph Builder**
+   - Track all function calls
+   - Build caller/callee relationships
+   - Identify function clusters
+
+3. **Symbol Database**
+   - Store all identified symbols
+   - Track confidence levels
+   - Support batch updates
+
+**Deliverable**: Can analyze bundle structure and output module map
+
+### Phase 2: Structural Inference (Week 2)
+
+**Goal**: Auto-name from patterns
+
+1. **Object Property Inference**
+   - Parse object literals with readable keys
+   - Propagate names to minified values
+
+2. **Class Name Inference**
+   - Find classes with `name` getters
+   - Rename class definitions
+
+3. **Export Name Inference**
+   - Track what names things are exported as
+   - Rename to match export names
+
+**Deliverable**: 200+ additional symbols named automatically
+
+### Phase 3: Variable Renaming (Week 3)
+
+**Goal**: Rename within function bodies
+
+1. **Scope Analysis**
+   - Track variable declarations and usages
+   - Build scope chains
+
+2. **Variable Naming Heuristics**
+   - Type-based naming
+   - Source-based naming
+   - Usage-based naming
+
+3. **Safe Renaming**
+   - Use Babel scope analysis
+   - Handle shadowing correctly
+
+**Deliverable**: Variables renamed with meaningful (if generic) names
+
+### Phase 4: Module Extraction (Week 4)
+
+**Goal**: Split bundle into logical files
+
+1. **Module Boundary Detection**
+   - Parse bundler factory patterns
+   - Identify module starts/ends
+
+2. **Dependency Resolution**
+   - Track cross-module references
+   - Generate import statements
+
+3. **File Generation**
+   - Name files based on content
+   - Write separate JS files
+   - Generate index.js with re-exports
+
+**Deliverable**: Multi-file output matching original structure
+
+### Phase 5: Documentation & Polish (Week 5)
+
+**Goal**: Make output genuinely readable
+
+1. **Comment Injection**
+   - Add function documentation
+   - Add section markers
+   - Add module headers
+
+2. **Type Annotations**
+   - Parse sdk-tools.d.ts
+   - Add JSDoc type comments
+
+3. **Formatting**
+   - Consistent style
+   - Logical ordering
+   - Clean imports
+
+**Deliverable**: Publication-ready deminified code
+
+---
+
+## Part 7: New Tools and Commands
+
+### 7.1 analyze-bundle
+
+```bash
+node dist/cli/analyze-bundle.js <cli.js>
+```
+
+Output:
+```
+Bundle Analysis:
+- Total size: 3.2MB
+- Modules detected: 47
+- Functions: 2,234
+- Classes: 12
+- Variables: 15,064
+
+Module Map:
+- Module 0: Entry point (exports main)
+- Module 1: Config (CLAUDE_CONFIG_DIR, CLAUDE_API_KEY)
+- Module 2: Tools (Bash, Read, Write, Glob, Grep)
+...
+```
+
+### 7.2 infer-names
+
+```bash
+node dist/cli/infer-names.js <fingerprints.json> --strategy=all
+```
+
+Strategies:
+- `anchors` - Current approach
+- `objects` - Object property inference
+- `classes` - Class name inference
+- `exports` - Export name inference
+- `callgraph` - Propagation through calls
+- `all` - All of the above
+
+### 7.3 extract-modules
+
+```bash
+node dist/cli/extract-modules.js <cli.js> --output=./deminified/
+```
+
+Output:
+```
+deminified/
+├── index.js
+├── modules/
+│   ├── config.js
+│   ├── tools.js
+│   ├── api.js
+│   └── ...
+└── README.md (generated, explains structure)
+```
+
+### 7.4 deminify (enhanced)
+
+```bash
+node dist/cli/deminify.js <cli.js> <fingerprints.json> \
+  --rename-variables \
+  --inject-comments \
+  --output=./output.js
+```
+
+New flags:
+- `--rename-variables` - Rename local variables
+- `--inject-comments` - Add documentation comments
+- `--extract-modules` - Split into multiple files
+- `--type-annotations` - Add JSDoc from .d.ts
+
+---
+
+## Part 8: Success Metrics
+
+| Metric | Current | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
+|--------|---------|---------|---------|---------|---------|---------|
+| Functions named | 24 | 24 | 250+ | 250+ | 250+ | 300+ |
+| Variables renamed | 0 | 0 | 0 | 5000+ | 5000+ | 5000+ |
+| Classes named | 0 | 0 | 10+ | 10+ | 10+ | 12+ |
+| Modules extracted | 0 | 0 | 0 | 0 | 40+ | 40+ |
+| Has comments | No | No | No | No | No | Yes |
+| Type annotations | No | No | No | No | No | Yes |
+| **Overall readability** | 5% | 5% | 20% | 40% | 60% | 70%+ |
+
+---
+
+## Part 9: Technical Architecture
+
+### New File Structure
+
+```
+src/
+├── cli/
+│   ├── deminify.ts        # Enhanced with new features
+│   ├── analyze-bundle.ts  # New: bundle structure analysis
+│   ├── infer-names.ts     # New: structural inference
+│   └── extract-modules.ts # New: module extraction
+├── analysis/
+│   ├── bundle-parser.ts   # Parse bundler patterns
+│   ├── call-graph.ts      # Build function call graph
+│   ├── scope-analyzer.ts  # Analyze variable scopes
+│   └── type-matcher.ts    # Match functions to .d.ts types
+├── inference/
+│   ├── object-props.ts    # Infer from object literals
+│   ├── class-names.ts     # Infer from class structure
+│   ├── export-names.ts    # Infer from export statements
+│   └── propagate.ts       # Propagate through call graph
+├── transform/
+│   ├── rename-vars.ts     # Variable renaming
+│   ├── inject-comments.ts # Add documentation
+│   └── extract-module.ts  # Split into files
+└── store/
+    ├── symbol-db.ts       # Enhanced symbol storage
+    └── inference-cache.ts # Cache inference results
+```
+
+### Core Data Structures
 
 ```typescript
-// === NEW: Tool Handlers ===
-{
-  pattern: 'tool:bash',
-  isRegex: false,
-  suggestedName: 'handleBashTool',
-  confidence: 0.9,
-  description: 'Bash tool execution handler',
-},
-{
-  pattern: 'tool:read',
-  isRegex: false,
-  suggestedName: 'handleReadTool',
-  confidence: 0.9,
-  description: 'File read tool handler',
-},
-// ... more tool handlers
+interface BundleAnalysis {
+  modules: ModuleInfo[];
+  exports: ExportInfo[];
+  callGraph: Map<string, string[]>;
+  symbolMap: Map<string, InferredSymbol>;
+}
+
+interface ModuleInfo {
+  id: number;
+  startLine: number;
+  endLine: number;
+  exports: string[];
+  imports: string[];
+  suggestedName: string;
+  anchors: string[];
+}
+
+interface InferredSymbol {
+  minifiedName: string;
+  inferredName: string;
+  confidence: number;
+  source: 'anchor' | 'object' | 'class' | 'export' | 'callgraph' | 'manual';
+  location: Location;
+  type: 'function' | 'variable' | 'class' | 'parameter';
+}
 ```
 
-## Part 6: Testing Changes
+---
 
-### 6.1 Rebuild After Changes
+## Part 10: Getting Started (Immediate Actions)
 
-```bash
-cd C:\Users\Nat\source\claudetracker
-npm run build
+### Week 1: Foundation
+
+1. **Build the bundle analyzer**
+   ```bash
+   # Create src/cli/analyze-bundle.ts
+   # Parse cli.js and output module structure
+   npm run build && node dist/cli/analyze-bundle.js "$CLI_JS"
+   ```
+
+2. **Run initial analysis**
+   - Count modules detected
+   - List all export patterns
+   - Identify tool handlers by export name
+
+3. **Enhance fingerprinting**
+   - Add export name detection to fingerprint data
+   - Track which module each function belongs to
+
+### Quick Win: Object Property Inference
+
+The easiest improvement with highest impact:
+
+```javascript
+// Find patterns like:
+var TOOLS = { Bash: Xz, Read: Qm, Write: Rv };
+
+// Automatically infer:
+// Xz -> "bashTool" or "handleBash"
+// Qm -> "readTool" or "handleRead"
+// Rv -> "writeTool" or "handleWrite"
 ```
 
-### 6.2 Run Fingerprinting with New Rules
+Implementation:
+1. Find all ObjectExpression nodes
+2. Filter to those with Identifier keys (readable names)
+3. If value is an Identifier (minified), create name mapping
+4. Apply prefix/suffix based on context ("Tool", "Handler", etc.)
 
-```bash
-# Generate new fingerprints
-CLI_JS="/tmp/claude-tracker-data/npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
-node dist/cli/fingerprint.js "$CLI_JS" --with-anchors --json > /tmp/fingerprints-new.json
+This alone could identify 50+ symbols.
 
-# Compare coverage
-echo "Before:"
-jq '[.[] | select(.inferredName != null)] | length' /tmp/fingerprints.json
+---
 
-echo "After:"
-jq '[.[] | select(.inferredName != null)] | length' /tmp/fingerprints-new.json
+## Conclusion
 
-# List newly named functions
-jq -r '.[] | select(.inferredName != null) | .inferredName' /tmp/fingerprints-new.json | sort > /tmp/names-new.txt
-jq -r '.[] | select(.inferredName != null) | .inferredName' /tmp/fingerprints.json | sort > /tmp/names-old.txt
-comm -13 /tmp/names-old.txt /tmp/names-new.txt
-```
+The path to readable deminified code is not "add more anchor rules" but "think structurally":
 
-### 6.3 Spot-Check New Matches
+1. **Leverage the bundler** - It left clues about module boundaries
+2. **Follow the names** - Export names, object keys, class getters tell us what things are called
+3. **Propagate knowledge** - Once we know one name, we can often infer related names
+4. **Be comprehensive** - Don't just rename functions; rename variables, add comments, extract modules
 
-Verify that new rules match the right functions:
+The goal is not perfect reconstruction (that requires source maps or the actual source). The goal is **readable code** - where a developer can understand the structure, find relevant sections, and follow the logic.
 
-```bash
-# Check specific new rule
-RULE_PATTERN="your_new_pattern"
-jq --arg p "$RULE_PATTERN" '
-  .[] |
-  select(.fingerprint.anchors | any(contains($p))) |
-  {name: .name, inferredName: .inferredName, anchors: .fingerprint.anchors}
-' /tmp/fingerprints-new.json
-```
-
-## Part 7: Cross-Version Validation
-
-### 7.1 Run Validation Script
-
-The validation script checks that rules work consistently across multiple Claude Code versions:
-
-```bash
-# Ensure data repo is cloned
-DATA_REPO="/tmp/claude-tracker-data"
-cd "$DATA_REPO" && git log --oneline -5  # Verify it's the right repo
-
-# Run validation (requires bash/WSL on Windows)
-cd C:\Users\Nat\source\claudetracker
-bash scripts/validate-across-versions.sh
-```
-
-### 7.2 Validation Output Interpretation
-
-The script tests against multiple versions and reports:
-
-```
-=== Cross-Version Fingerprint Validation ===
-
-Processing version 2.0.71 (commit a90b8c0)...
-  Version 2.0.71: 24/1847 functions with inferred names
-
-Processing version 2.0.76 (commit 3811461)...
-  Version 2.0.76: 24/1852 functions with inferred names
-
-Processing version 2.1.2 (commit c859f28)...
-  Version 2.1.2: 24/1890 functions with inferred names
-
-=== Anchor Persistence Check ===
-Anchor: 'CLAUDE_CONFIG_DIR'
-  2.0.71: 1 functions contain this anchor
-  2.0.76: 1 functions contain this anchor
-  2.1.2: 1 functions contain this anchor
-```
-
-**Good signs**:
-- Same anchors appear in all versions
-- Named function count is similar across versions
-- Same semantic name resolves in each version
-
-**Warning signs**:
-- Anchor appears in 0 functions in some versions (pattern may have changed)
-- Wildly different function counts (may indicate false positives)
-
-### 7.3 Update Validation Versions
-
-If new Claude Code versions are available, update `scripts/validate-across-versions.sh`:
-
-```bash
-# Find available commits in data repo
-cd /tmp/claude-tracker-data
-git log --oneline | head -20
-
-# Update VERSIONS array in validate-across-versions.sh
-VERSIONS=(
-    "commit1:version1"
-    "commit2:version2"
-    "commit3:version3"
-)
-```
-
-## Part 8: Function Categories to Prioritize
-
-Focus on these categories in order of value:
-
-### 8.1 High Priority (Core Functionality)
-
-1. **System Prompts** - Functions returning system prompt text
-   - Look for: `You are Claude`, `You are a Claude agent`, `IMPORTANT:`, `CRITICAL:`
-   - Naming: `getSystemPrompt`, `getAgentPrompt`, `getToolPrompt`
-
-2. **Tool Handlers** - Functions that implement each tool
-   - Look for: `tool:X` patterns, tool schema strings, tool names
-   - Naming: `handleXTool`, `executeX`, `validateXInput`
-
-3. **Settings/Config** - User preference handling
-   - Look for: `CLAUDE_X` env vars, settings keys, config paths
-   - Naming: `getXSetting`, `loadXConfig`, `isXEnabled`
-
-4. **API Clients** - Functions making API calls
-   - Look for: `api.anthropic.com`, endpoint paths, API keys
-   - Naming: `callXApi`, `fetchX`, `postToX`
-
-### 8.2 Medium Priority (Observability)
-
-5. **Metrics** - Telemetry and usage tracking
-   - Look for: `claude_code.X.count`, `claude_code.X.usage`
-   - Naming: `getXCounter`, `recordXMetric`, `trackX`
-
-6. **Error Handlers** - Exception handling and validation
-   - Look for: Error message strings, `throw`, `catch`
-   - Naming: `handleXError`, `validateX`, `assertX`
-
-7. **Logging** - Debug and info output
-   - Look for: Log prefixes, debug flags, console patterns
-   - Naming: `logX`, `debugX`, `warnX`
-
-### 8.3 Lower Priority (Infrastructure)
-
-8. **Model Selection** - Model routing and selection
-   - Look for: `claude-opus`, `claude-sonnet`, model IDs
-   - Naming: `selectModel`, `getModelId`, `isModelAvailable`
-
-9. **Auth/OAuth** - Authentication flows
-   - Look for: OAuth endpoints, token patterns, auth URLs
-   - Naming: `authenticateX`, `refreshToken`, `validateAuth`
-
-10. **File Operations** - File system interactions
-    - Look for: Path patterns, file extensions, directory operations
-    - Naming: `readX`, `writeX`, `findX`
-
-## Part 9: Iteration Workflow
-
-### 9.1 Batch Process
-
-Work in batches of 10-20 rules:
-
-1. **Analyze**: Run anchor frequency analysis
-2. **Select**: Choose 10-20 promising anchors from one category
-3. **Research**: Check each anchor's context in the fingerprint data
-4. **Draft**: Write rules with appropriate names and confidence
-5. **Test**: Rebuild and verify coverage increase
-6. **Validate**: Run cross-version validation
-7. **Commit**: If validation passes, commit the changes
-
-### 9.2 Example Batch Session
-
-```bash
-# 1. Focus on metrics category
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json |
-  grep "^claude_code\." | sort | uniq -c | sort -rn | head -20
-
-# 2. For each promising metric, check context
-jq '.[] | select(.fingerprint.anchors | any(contains("claude_code.file_edit")))' /tmp/fingerprints.json
-
-# 3. Add rules to rules.ts, then:
-npm run build
-node dist/cli/fingerprint.js "$CLI_JS" --with-anchors 2>&1 | grep "Auto-named:"
-
-# 4. Validate
-bash scripts/validate-across-versions.sh
-```
-
-### 9.3 Tracking Progress
-
-Maintain a progress log:
-
-```markdown
-## Progress Log
-
-### 2024-01-10
-- Added 15 metric rules (claude_code.X.count patterns)
-- Coverage: 24 -> 39 functions
-- Validation: PASS on all 3 versions
-
-### 2024-01-11
-- Added 12 tool handler rules
-- Coverage: 39 -> 51 functions
-- Validation: PASS, but tool:edit changed between 2.0.71 and 2.0.76
-```
-
-## Part 10: Troubleshooting
-
-### 10.1 Rule Not Matching
-
-If a rule isn't matching expected functions:
-
-```bash
-# Verify the anchor exists in fingerprints
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep -F "your_pattern"
-
-# Check for whitespace/encoding issues
-jq -r '.[].fingerprint.anchors[]' /tmp/fingerprints.json | grep "your_pattern" | xxd | head
-
-# Test regex syntax
-node -e "console.log(/your_regex/.test('test_string'))"
-```
-
-### 10.2 False Positives
-
-If a rule matches wrong functions:
-
-1. Make the pattern more specific (longer string)
-2. Add additional required context via a second rule
-3. Lower the confidence score
-4. Consider splitting into multiple specific rules
-
-### 10.3 Version Instability
-
-If an anchor appears in some versions but not others:
-
-1. Check if the feature was added/removed between versions
-2. Look for alternative anchors that are more stable
-3. Consider using regex to handle pattern variations
-4. Document the version range where the rule applies
-
-## Summary Checklist
-
-- [ ] Clone data repo and generate fresh fingerprints
-- [ ] Analyze anchor frequency to find candidates
-- [ ] Categorize anchors by function type
-- [ ] Add rules in batches of 10-20
-- [ ] Rebuild and test after each batch
-- [ ] Run cross-version validation
-- [ ] Track coverage progress
-- [ ] Target 100+ named functions for meaningful improvement
+With the approach outlined here, we can go from 1% coverage to 60%+ meaningful readability, transforming the deminified output from "technically unpacked" to "genuinely useful for understanding Claude Code's architecture."
