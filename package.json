@@ -12,7 +12,8 @@
     "annotate": "node dist/cli/annotate.js",
     "rename": "node dist/cli/rename.js",
     "stats": "node dist/cli/stats.js",
-    "fingerprint": "node dist/cli/fingerprint.js"
+    "fingerprint": "node dist/cli/fingerprint.js",
+    "deminify": "node dist/cli/deminify.js"
   },
   "dependencies": {
     "@babel/parser": "^7.24.0",
@@ -21,6 +22,7 @@
     "@babel/generator": "^7.24.0"
   },
   "devDependencies": {
+    "@types/babel__generator": "^7.6.0",
     "@types/babel__traverse": "^7.20.0",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"

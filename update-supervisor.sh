@@ -5,6 +5,7 @@ set -euo pipefail
 REPO_URL="${CLAUDETRACKER_REPO_URL:-git@github.com:YOUR_USER/claudetracker-data.git}"
 WORK_DIR="/tmp/claudetracker-data"
 SSH_KEY="${CLAUDETRACKER_SSH_KEY:-/run/secrets/deploy_key}"
+TRACKER_DIR="/home/node/tracker"
 
 echo "=== Claude Tracker Update: $(date -u +%Y-%m-%d-%H%M%S) ==="
 
@@ -24,17 +25,20 @@ else
     npm update -g @anthropic-ai/claude-code
 fi
 
-# Copy tracked files into repo
-echo "Copying tracked files..."
-mkdir -p "$WORK_DIR/npm-global"
-rsync -a --delete /home/node/.npm-global/ "$WORK_DIR/npm-global/"
+# Copy tracked files into minified folder (renamed from npm-global)
+echo "Copying tracked files to minified/..."
+mkdir -p "$WORK_DIR/minified"
+rsync -a --delete /home/node/.npm-global/ "$WORK_DIR/minified/"
+
+# Remove old npm-global if it exists (migrating to new structure)
+rm -rf "$WORK_DIR/npm-global"
 
 # Remove .claude/ if it exists (no longer tracked - too noisy)
 rm -rf "$WORK_DIR/.claude"
 
 # Prettify JS files one by one (prettier ignores node_modules by default)
 echo "Prettifying JS files..."
-find "$WORK_DIR/npm-global" -name "*.js" -type f | while read -r jsfile; do
+find "$WORK_DIR/minified" -name "*.js" -type f | while read -r jsfile; do
     echo "  Formatting: $jsfile"
     # Copy to temp, format, copy back (avoids prettier's node_modules ignore)
     cp "$jsfile" /tmp/format.js
@@ -46,14 +50,15 @@ find "$WORK_DIR/npm-global" -name "*.js" -type f | while read -r jsfile; do
 done
 
 # Run fingerprint analysis on the main CLI
-CLI_JS="$WORK_DIR/npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+CLI_JS="$WORK_DIR/minified/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+REPORT_DIR="$WORK_DIR/fingerprints"
+
 if [ -f "$CLI_JS" ]; then
     echo "Running fingerprint analysis..."
-    REPORT_DIR="$WORK_DIR/fingerprints"
     mkdir -p "$REPORT_DIR"
 
     # Generate fingerprint report
-    node /home/node/tracker/dist/cli/fingerprint.js "$CLI_JS" --with-anchors --json > "$REPORT_DIR/latest.json" 2>/dev/null || true
+    node "$TRACKER_DIR/dist/cli/fingerprint.js" "$CLI_JS" --with-anchors --json > "$REPORT_DIR/latest.json" 2>/dev/null || true
 
     # Generate summary
     node -e "
@@ -75,6 +80,22 @@ console.log(JSON.stringify(summary, null, 2));
 " > "$REPORT_DIR/summary.json" 2>/dev/null || echo "Summary generation failed"
 
     echo "Fingerprint analysis complete"
+
+    # Generate deminified version
+    echo "Generating deminified version..."
+    mkdir -p "$WORK_DIR/deminified/lib/node_modules/@anthropic-ai/claude-code"
+
+    DEMINIFIED_CLI="$WORK_DIR/deminified/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+
+    if node --max-old-space-size=4096 "$TRACKER_DIR/dist/cli/deminify.js" "$CLI_JS" "$REPORT_DIR/latest.json" "$DEMINIFIED_CLI" 2>/dev/null; then
+        echo "Deminified version generated"
+
+        # Copy package.json and other non-JS files
+        cp "$WORK_DIR/minified/lib/node_modules/@anthropic-ai/claude-code/package.json" \
+           "$WORK_DIR/deminified/lib/node_modules/@anthropic-ai/claude-code/" 2>/dev/null || true
+    else
+        echo "Warning: deminification failed"
+    fi
 fi
 
 # Commit and push if changes
